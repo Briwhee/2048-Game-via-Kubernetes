@@ -1,0 +1,6 @@
+To run these commands, you will need the following:
+kubectl
+eksctl
+AWS CLI
+
+Once set up you can move to the implementation
