@@ -1,0 +1,57 @@
+eksctl create cluster --name $ClusterName --region $RegionName --fargate #fargate was used in place of EC2
+
+aws eks update-kubeconfig --name $ClusterName --region $RegionName
+
+eksctl create fargateprofile \
+    --cluster $ClusterName \
+    --region $RegionName \
+    --name alb-sample-app \
+    --namespace game-2048
+
+#This is the 2048 official code to use
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.5.4/docs/examples/2048/2048_full.yaml
+
+#commands to watch and confirm creation
+
+kubectl get pods -n game-2048 -w
+kubectl get ingress -n game-2048 -w
+
+#Configure IAM OIDC provider to grant access to creating your Load Balancer Controller
+
+export cluster_name=$ClusterName
+oidc_id=$(aws eks describe-cluster --name $ClusterName --query "cluster.identity.oidc.issuer" --output text | cut -d '/' -f 5) 
+
+#Confirm IAM OIDC
+
+eksctl utils associate-iam-oidc-provider --cluster $ClusterName --approve
+
+#Pull LB json from github and create IAM Policy and Role for Kubernetes
+
+curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.5.4/docs/install/iam_policy.json
+
+aws iam create-policy \
+    --policy-name AWSLoadBalancerControllerIAMPolicy \
+    --policy-document file://iam_policy.json
+
+eksctl create iamserviceaccount \
+  --cluster=<your-cluster-name> \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --role-name AmazonEKSLoadBalancerControllerRole \
+  --attach-policy-arn=arn:aws:iam::<your-aws-account-id>:policy/AWSLoadBalancerControllerIAMPolicy \
+  --approve
+
+#Deploy Load Balancer via Helm
+
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update eks
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \            
+  -n kube-system \
+  --set clusterName=<your-cluster-name> \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region=<region> \
+  --set vpcId=<your-vpc-id>
+
+#Watch deployment to confrim app is running
+kubectl get deployment -n kube-system aws-load-balancer-controller -w
